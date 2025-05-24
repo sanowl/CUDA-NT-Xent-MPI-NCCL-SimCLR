@@ -12,6 +12,8 @@ option(USE_TENSOR_CORES "Enable Tensor Cores (requires Volta+ GPU)" ON)
 option(BUILD_PYTHON_MODULE "Build Python bindings" ON)
 option(ENABLE_MPI "Enable MPI support" OFF)
 option(ENABLE_NCCL "Enable NCCL support" OFF)
+option(USE_FP16 "Enable FP16 support" ON)
+option(BUILD_BENCHMARKS "Build benchmark suite" ON)
 
 # Version requirements
 set(MIN_CUDA_VERSION 11.0)
@@ -51,7 +53,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Set CUDA architectures based on GPU capability
+# Detect CUDA architectures
 include(FindCUDA/select_compute_arch)
 CUDA_DETECT_INSTALLED_GPUS(CUDA_ARCHS)
 string(STRIP "${CUDA_ARCHS}" CUDA_ARCHS)
@@ -59,14 +61,26 @@ string(REPLACE " " ";" CUDA_ARCHS "${CUDA_ARCHS}")
 set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHS})
 
 # Set optimization flags
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} \
+    -O3 \
+    -use_fast_math \
+    --expt-relaxed-constexpr \
+    --expt-extended-lambda \
+    --generate-line-info \
+    --ptxas-options=-v")
+
 if(USE_TENSOR_CORES)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DUSE_TENSOR_CORES")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} \
+        -DUSE_TENSOR_CORES \
+        --gpu-architecture=compute_70")
 endif()
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -use_fast_math --expt-relaxed-constexpr")
+if(USE_FP16)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DUSE_FP16")
+endif()
 
 if(ENABLE_PROFILING)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -DENABLE_PROFILING")
 endif()
 
 # Add compiler warnings
@@ -80,9 +94,8 @@ endif()
 
 # Library target
 add_library(ntxent_cuda SHARED
-    src/ntxent_kernel_new.cu
-    src/binding_new.cpp
-)
+    src/ntxent_kernel.cu
+    src/binding.cpp)
 
 target_include_directories(ntxent_cuda 
     PRIVATE 
@@ -108,8 +121,10 @@ if(ENABLE_NCCL)
 endif()
 
 # Benchmark executable
-add_executable(benchmark src/benchmark.cpp)
-target_link_libraries(benchmark PRIVATE ntxent_cuda)
+if(BUILD_BENCHMARKS)
+    add_executable(benchmark src/benchmark.cpp)
+    target_link_libraries(benchmark PRIVATE ntxent_cuda)
+endif()
 
 # Testing
 if(BUILD_TESTS)
@@ -126,6 +141,6 @@ install(TARGETS ntxent_cuda
 )
 
 install(FILES 
-    include/ntxent_kernel_new.cuh
+    include/ntxent_kernel.cuh
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ntxent
 )
